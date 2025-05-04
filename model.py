@@ -14,7 +14,7 @@ import requests
 app = Flask(__name__)
 
 # تحميل الموديل و compile
-model = tf.keras.models.load_model('/home/ubuntu/xception/modelv2.h5')  # استبدل بالمسار الصحيح
+model = tf.keras.models.load_model('modelv2.h5')  # استبدل بالمسار الصحيح
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
 # فئات الموديل (من HAM10000 أو استبدل بتاعك)
