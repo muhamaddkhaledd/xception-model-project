@@ -4,21 +4,43 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""  # تعطيل الـ GPU
 from flask import Flask, request, jsonify
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageEnhance
 import io
 import tensorflow as tf
-from tensorflow.keras.models import Model
+from tensorflow.keras import Model
 import base64
 import requests
-
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from huggingface_hub import hf_hub_download
 app = Flask(__name__)
 
 # تحميل الموديل و compile
-model = tf.keras.models.load_model('modelv2.h5')  # استبدل بالمسار الصحيح
+model_path = hf_hub_download(
+    repo_id="muhamaddkhaledd/xception-model-for-skin-diseases",
+    filename="XCEPTIONv2.h5"
+)
+model = tf.keras.models.load_model(model_path)
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
+
+#loading chatbot
+chatbot_model_name = "muhamaddkhaledd/skin-diseases-chatbot-s3"
+chatbot_tokenizer = GPT2Tokenizer.from_pretrained(chatbot_model_name)
+chatbot_model = GPT2LMHeadModel.from_pretrained(chatbot_model_name)
+chatbot_model.eval()
+
+
 # فئات الموديل (من HAM10000 أو استبدل بتاعك)
-class_labels = ['akiec', 'bcc', 'bkl', 'df', 'mel', 'nv', 'vasc']
+class_labels = [
+    'Actinic keratoses',
+    'Basal cell carcinoma',
+    'Benign keratosis-like lesions',
+    'Dermatofibroma',
+    'Melanoma',
+    'Melanocytic nevi',
+    'Vascular lesions'
+]
+
 
 # فحص جودة الصورة
 def analyze_image_quality(image_bytes, sharpness_threshold=100.0, brightness_threshold=(50, 200), min_resolution=(256, 256), noise_threshold=70.0, saturation_threshold=0.1):
@@ -76,6 +98,32 @@ def analyze_image_quality(image_bytes, sharpness_threshold=100.0, brightness_thr
     except Exception as e:
         return {"error": "Error processing the image", "details": str(e)}
 
+# Enhance image quality before passing to the model
+def enhance_image(image_bytes):
+    # Open image with PIL
+    img_pil = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+
+    # Resize image to 299x299 (model input size)
+    img_pil = img_pil.resize((299, 299))
+
+    # Enhance sharpness if needed
+    enhancer = ImageEnhance.Sharpness(img_pil)
+    img_pil = enhancer.enhance(2.0)  # Increase sharpness by 2x
+
+    # Enhance brightness if needed
+    enhancer = ImageEnhance.Brightness(img_pil)
+    img_pil = enhancer.enhance(1.2)  # Slightly increase brightness
+
+    # Enhance contrast if needed
+    enhancer = ImageEnhance.Contrast(img_pil)
+    img_pil = enhancer.enhance(1.5)  # Slightly increase contrast
+
+    # Convert to numpy array and normalize
+    img_array = np.array(img_pil) / 255.0
+    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+
+    return img_array
+
 # فنكشن لتوليد Grad-CAM
 def generate_gradcam(image_bytes, model):
     try:
@@ -128,12 +176,11 @@ def generate_gradcam(image_bytes, model):
 # فنكشن التنبؤ بالمرض
 def predict_disease(image_bytes):
     try:
-        # تحميل الصورة وتحويلها لـ RGB
-        img_pil = Image.open(io.BytesIO(image_bytes)).convert('RGB')  # تحويل لـ 3 قنوات
-        img_pil = img_pil.resize((299, 299))  # تغيير الحجم لـ 299x299
-        img_array = np.array(img_pil) / 255.0
-        img_array = np.expand_dims(img_array, axis=0)
-        prediction = model.predict(img_array)
+        # Enhance the image quality before prediction
+        enhanced_image_array = enhance_image(image_bytes)
+
+        # Predict using the enhanced image
+        prediction = model.predict(enhanced_image_array)
         predicted_class_idx = int(np.argmax(prediction, axis=1)[0])
         predicted_class = class_labels[predicted_class_idx]
         confidence = float(prediction[0][predicted_class_idx])
@@ -156,37 +203,33 @@ def explain_disease(prediction_result, gradcam_result):
         if disease_id is None or disease_name is None:
             return {"error": "No prediction result available"}
 
-        prompt = f"""
-        You are a medical AI assistant specialized in interpreting medical image analysis results. A deep learning model analyzed a medical image and predicted a disease: {disease_name} (ID {disease_id}) with confidence {confidence:.4f}. The model also generated a Grad-CAM heatmap highlighting the regions of interest in the image that contributed to this prediction.
+        prompt = f"Tell me about {disease_name} and What it is Symptoms and Prevention and Treatment and Medications"
 
-        Please provide a clear and concise explanation of why the model predicted this disease. Include:
-        - A description of what {disease_name} represents in medical imaging (e.g., characteristics of the condition).
-        - An explanation of how the highlighted regions in the heatmap (indicating areas of focus) might relate to the disease.
-        - Any potential causes or characteristics of the disease that could be inferred from the image analysis.
+        # Generate explanation using fine-tuned GPT-2
+        input_ids = chatbot_tokenizer.encode(prompt, return_tensors="pt")
 
-        Ensure the explanation is professional, medically accurate, and understandable to non-experts. Avoid speculative or overly technical jargon.
-        """
+        output = chatbot_model.generate(
+            input_ids,
+            max_length=500,
+            num_return_sequences=1,
+            do_sample=True,
+            top_k=50,
+            top_p=0.95,
+            temperature=0.7,
+            pad_token_id=chatbot_tokenizer.eos_token_id,
+            no_repeat_ngram_size=2
+        )
 
-        gemini_api_key = "AIzaSyD1FGT_b-nE4M4m1AjlpumpaaoaXZ96m3E"  # استبدل بالـ key الجديد
-        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-        headers = {"Content-Type": "application/json"}
-        data = {
-            "contents": [{"parts": [{"text": prompt}]}]
-        }
-        response = requests.post(f"{gemini_url}?key={gemini_api_key}", json=data, headers=headers)
-
-        if response.status_code == 200:
-            explanation = response.json()['candidates'][0]['content']['parts'][0]['text']
-        else:
-            explanation = f"Could not generate explanation due to API error: {response.text}"
+        response_text = chatbot_tokenizer.decode(output[0], skip_special_tokens=True)
 
         return {
-            "explanation": explanation,
+            "explanation": response_text,
             "disease_name": disease_name,
             "confidence": confidence
         }
     except Exception as e:
         return {"error": "Error generating explanation", "details": str(e)}
+
 
 # endpoint لرفع الصورة ومعالجتها
 @app.route('/upload', methods=['POST'])
@@ -202,21 +245,17 @@ def upload_image():
     try:
         image_bytes = file.read()
 
-        quality_check_results = analyze_image_quality(image_bytes)
+        # Enhance the image quality before passing it to the model
+        enhanced_image_array = enhance_image(image_bytes)
 
-        if not quality_check_results.get("overall", False):
-            return jsonify({
-                "message": "Image quality check failed",
-                "quality_check": quality_check_results
-            }), 400
-
+        # Predict disease with the enhanced image
         prediction_results = predict_disease(image_bytes)
+
         gradcam_results = generate_gradcam(image_bytes, model)
         explanation_results = explain_disease(prediction_results, gradcam_results)
 
         return jsonify({
             "message": "Image processed successfully",
-            "quality_check": quality_check_results,
             "prediction": prediction_results,
             "gradcam": gradcam_results,
             "explanation": explanation_results

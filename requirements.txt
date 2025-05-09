@@ -3,4 +3,6 @@ opencv-python
 numpy
 Pillow
 tensorflow
+transformers
+huggingface_hub
 requests
