@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = ""  # تعطيل الـ GPU
+os.environ["CUDA_VISIBLE_DEVICES"] = ""  # Disable GPU
 
 from flask import Flask, request, jsonify
 import cv2
@@ -14,7 +14,7 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from huggingface_hub import hf_hub_download
 app = Flask(__name__)
 
-# تحميل الموديل و compile
+# Load exception model
 model_path = hf_hub_download(
     repo_id="muhamaddkhaledd/xception-model-for-skin-diseases",
     filename="XCEPTIONv2.h5"
@@ -30,7 +30,7 @@ chatbot_model = GPT2LMHeadModel.from_pretrained(chatbot_model_name)
 chatbot_model.eval()
 
 
-# فئات الموديل (من HAM10000 أو استبدل بتاعك)
+# diseases
 class_labels = [
     'Actinic keratoses',
     'Basal cell carcinoma',
@@ -42,7 +42,7 @@ class_labels = [
 ]
 
 
-# فحص جودة الصورة
+# check image quality
 def analyze_image_quality(image_bytes, sharpness_threshold=100.0, brightness_threshold=(50, 200), min_resolution=(256, 256), noise_threshold=70.0, saturation_threshold=0.1):
     try:
         image = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
@@ -124,7 +124,7 @@ def enhance_image(image_bytes):
 
     return img_array
 
-# فنكشن لتوليد Grad-CAM
+# Grad-CAM
 def generate_gradcam(image_bytes, model):
     try:
         img_pil = Image.open(io.BytesIO(image_bytes)).convert('RGB')
@@ -173,7 +173,7 @@ def generate_gradcam(image_bytes, model):
     except Exception as e:
         return {"error": "Error generating Grad-CAM", "details": str(e)}
 
-# فنكشن التنبؤ بالمرض
+# disease prediction
 def predict_disease(image_bytes):
     try:
         # Enhance the image quality before prediction
@@ -193,7 +193,7 @@ def predict_disease(image_bytes):
     except Exception as e:
         return {"error": "Error predicting disease", "details": str(e)}
 
-# فنكشن لتفسير سبب المرض باستخدام Gemini API
+# disease details using finetuned GPT-2 chatbot
 def explain_disease(prediction_result, gradcam_result):
     try:
         disease_id = prediction_result.get("class_id")
@@ -203,14 +203,14 @@ def explain_disease(prediction_result, gradcam_result):
         if disease_id is None or disease_name is None:
             return {"error": "No prediction result available"}
 
-        prompt = f"Tell me about {disease_name} and What it is Symptoms and Prevention and Treatment and Medications"
+        prompt = f"Tell me about {disease_name} and What it is Symptoms and Prevention and Treatment and Medications ?"
 
         # Generate explanation using fine-tuned GPT-2
         input_ids = chatbot_tokenizer.encode(prompt, return_tensors="pt")
 
         output = chatbot_model.generate(
             input_ids,
-            max_length=500,
+            max_length=300,
             num_return_sequences=1,
             do_sample=True,
             top_k=50,
@@ -231,7 +231,7 @@ def explain_disease(prediction_result, gradcam_result):
         return {"error": "Error generating explanation", "details": str(e)}
 
 
-# endpoint لرفع الصورة ومعالجتها
+# endpoint api
 @app.route('/upload', methods=['POST'])
 def upload_image():
     if 'file' not in request.files:
