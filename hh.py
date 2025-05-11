@@ -5,7 +5,7 @@ import torch
 app = Flask(__name__)
 
 # Load model and tokenizer
-model_name = r"E:\exception model\bio-gpt-chatbot"  # Change to your fine-tuned model or local path
+model_name = "muhamaddkhaledd/skin-diseases-chatbot-BioGPT"  # Change to your fine-tuned model or local path
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 model.eval()

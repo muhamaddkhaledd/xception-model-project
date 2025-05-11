@@ -10,7 +10,7 @@ import tensorflow as tf
 from tensorflow.keras import Model
 import base64
 import requests
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import GPT2LMHeadModel, GPT2Tokenizer ,AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import hf_hub_download
 app = Flask(__name__)
 
@@ -23,10 +23,16 @@ model = tf.keras.models.load_model(model_path)
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
 
-#loading chatbot
-chatbot_model_name = "muhamaddkhaledd/skin-diseases-chatbot-s3"
-chatbot_tokenizer = GPT2Tokenizer.from_pretrained(chatbot_model_name)
-chatbot_model = GPT2LMHeadModel.from_pretrained(chatbot_model_name)
+#loading chatbot gpt2
+# chatbot_model_name = "muhamaddkhaledd/skin-diseases-chatbot-s3"
+# chatbot_tokenizer = GPT2Tokenizer.from_pretrained(chatbot_model_name)
+# chatbot_model = GPT2LMHeadModel.from_pretrained(chatbot_model_name)
+# chatbot_model.eval()
+
+#loading chatbot biogpt
+chatbot_model_name = "muhamaddkhaledd/skin-diseases-chatbot-BioGPT"
+chatbot_tokenizer = AutoTokenizer.from_pretrained(chatbot_model_name)
+chatbot_model = AutoModelForCausalLM.from_pretrained(chatbot_model_name)
 chatbot_model.eval()
 
 
@@ -203,14 +209,14 @@ def explain_disease(prediction_result, gradcam_result):
         if disease_id is None or disease_name is None:
             return {"error": "No prediction result available"}
 
-        prompt = f"Tell me about {disease_name} and What it is Symptoms and Prevention and Treatment and Medications ?"
+        prompt = f"User: Tell me about {disease_name} and What it is Symptoms and Prevention and Treatment and Medications ?\nBot:"
 
         # Generate explanation using fine-tuned GPT-2
         input_ids = chatbot_tokenizer.encode(prompt, return_tensors="pt")
 
         output = chatbot_model.generate(
             input_ids,
-            max_length=300,
+            max_length=200,
             num_return_sequences=1,
             do_sample=True,
             top_k=50,
@@ -221,9 +227,10 @@ def explain_disease(prediction_result, gradcam_result):
         )
 
         response_text = chatbot_tokenizer.decode(output[0], skip_special_tokens=True)
+        response_only = response_text.split("Bot:")[-1].strip()
 
         return {
-            "explanation": response_text,
+            "explanation": response_only,
             "disease_name": disease_name,
             "confidence": confidence
         }
